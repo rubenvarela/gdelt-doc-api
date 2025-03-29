@@ -85,6 +85,8 @@ class Filters:
         self,
         start_date: Optional[str] = None,
         end_date: Optional[str] = None,
+        start_datetime: Optional[str] = None,
+        end_datetime: Optional[str] = None,
         timespan: Optional[str] = None,
         num_records: int = 250,
         keyword: Optional[Filter] = None,
@@ -115,6 +117,15 @@ class Filters:
 
         end_date
             The end date for the filter in YYYY-MM-DD format.
+
+        start_datetime
+            The start date for the filter in YYYY-MM-DD::HH:MM:SS  format. The API officially only supports the
+            most recent 3 months of articles. Making a request for an earlier date range may still
+            return data, but it's not guaranteed.
+            Must provide either `start_date` and `end_date` or `timespan`
+
+        end_datetime
+            The end date for the filter in YYYY-MM-DD::HH:MM:SS format.
 
         timespan
             A timespan to search for, relative to the time of the request. Must match one of the API's timespan
@@ -177,14 +188,15 @@ class Filters:
         self._valid_countries: List[str] = []
         self._valid_themes: List[str] = []
 
-        # Check we have either start/end date or timespan, but not both
-        if not start_date and not end_date and not timespan:
-            raise ValueError("Must provide either start_date and end_date, or timespan")
-
-        if start_date and end_date and timespan:
+        # Time mutual exclusivity - error if not
+        if (
+                (timespan and (start_date or end_date or start_datetime or end_datetime))
+                or
+                ((start_date and start_datetime) or (end_date and end_datetime))
+        ):
             raise ValueError(
-                "Can only provide either start_date and end_date, or timespan"
-            )
+                "Must use only one of the following: (start_date and end_date), (start_datetime and end_datetime), "
+                "or timespan.")
 
         if keyword:
             self.query_params.append(self._keyword_to_string(keyword))
@@ -218,18 +230,33 @@ class Filters:
         if repeat:
             self.query_params.append(repeat)
 
-        if start_date:
-            if not end_date:
-                raise ValueError("Must provide both start_date and end_date")
-
-            self.query_params.append(
-                f'&startdatetime={start_date.replace("-", "")}000000'
-            )
-            self.query_params.append(f'&enddatetime={end_date.replace("-", "")}000000')
-
-        elif timespan:
+        # Handle time logic
+        if timespan:
             self._validate_timespan(timespan)
             self.query_params.append(f"&timespan={timespan}")
+
+        elif start_date and end_date:
+            # Handle date - YYYY-MM-DD
+            self.query_params.append(f'&startdatetime={start_date.replace("-", "")}000000')
+            self.query_params.append(f'&enddatetime={end_date.replace("-", "")}000000')
+
+            # Store originals
+            self.start_date = start_date
+            self.end_date = end_date
+
+        elif start_datetime and end_datetime:
+            # Handle datetime - YYYY-MM-DD:HH:MM:SS
+            self.query_params.append(f'&startdatetime={start_datetime.replace("-", "").replace(":", "")}')
+            self.query_params.append(f'&enddatetime={end_datetime.replace("-", "").replace(":", "")}')
+
+            # Store originals
+            self.start_datetime = start_datetime
+            self.end_datetime = end_datetime
+
+        else:
+            # Raise error if required parameter pairs are not provided
+            raise ValueError(
+                "Must provide either both `start_date` and `end_date`, both `start_datetime` and `end_datetime`, or a `timespan`.")
 
         if num_records > 250:
             raise ValueError(f"num_records must 250 or less, not {num_records}")
